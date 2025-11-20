@@ -68,7 +68,8 @@ export interface StockItem {
   code: string;
   name: string;
   item_name_hindi?: string | null;
-  quantity: number;
+  governmentAllocated?: number; // Original allocation from government (admin only)
+  quantity: number; // Current stock (shopkeeper can update)
   unit?: string | null;
 
   // Backend sometimes returns this:
@@ -76,6 +77,22 @@ export interface StockItem {
 
   // Older inserts return this:
   last_restocked?: string | null;
+}
+
+export interface StockAuditLog {
+  id: number;
+  itemCode: string;
+  shopId: string;
+  changedByRole: 'admin' | 'shopkeeper';
+  changedByName?: string;
+  changedByEmail?: string;
+  changeType: 'government_allocation' | 'shopkeeper_update' | 'admin_correction';
+  oldQuantity: number;
+  newQuantity: number;
+  quantityDifference: number;
+  reason?: string;
+  notes?: string;
+  createdAt: string;
 }
 
 
@@ -109,11 +126,49 @@ export interface HealthStatus {
   };
 }
 
+export interface UserData {
+  id: number;
+  email: string;
+  role: 'admin' | 'shopkeeper' | 'cardholder';
+  name?: string;
+  gender?: string;
+  mobileNumber?: string;
+  address?: string;
+  rationCardNumber?: string;
+  cardType?: 'AAY' | 'PHH' | 'BPL' | 'APL';
+  cardColor?: string;
+  familySize?: number;
+  socioEconomicCategory?: string;
+  occupation?: string;
+  annualIncome?: number;
+  shopId?: string;
+  shopName?: string;
+  isActive?: boolean;
+  isFlagged?: boolean;
+  flagReason?: string;
+  flaggedBy?: number;
+  flaggedByName?: string;
+  flaggedAt?: string;
+  lastLogin?: string;
+  createdAt?: string;
+}
+
+export interface UserStats {
+  shopId: string;
+  shopName: string;
+  shopkeepers: number;
+  cardholders: number;
+  flaggedUsers: number;
+  flaggedShopkeepers: number;
+}
+
 // -------------------------------------------------------------
 // STOCKS
 // -------------------------------------------------------------
-export function getStocks(shopId: string): Promise<StockItem[]> {
-  return request(`/stocks?shopId=${encodeURIComponent(shopId)}`);
+export async function getStocks(shopId: string): Promise<StockItem[]> {
+  const response: any = await request(`/stocks?shopId=${encodeURIComponent(shopId)}`);
+  // Backend returns { success: true, data: [...] }
+  return response?.data || [];
 }
 
 export function updateStockItem(
@@ -128,6 +183,33 @@ export function updateStockItem(
       deltaQuantity,
       shopId: shopId ?? null,
     }),
+  });
+}
+
+// PATCH stock with quantity (used by both admin and shopkeeper)
+export function patchStockItem(code: string, quantity: number, shopId?: string) {
+  return request(`/stocks/${code}`, {
+    method: "PATCH",
+    body: JSON.stringify({ quantity, shopId: shopId ?? null }),
+  });
+}
+
+// Get stock audit trail (admin only)
+export async function getStockAuditLogs(shopId: string, limit = 50): Promise<StockAuditLog[]> {
+  const response: any = await request(`/stocks/audit/${shopId}?limit=${limit}`);
+  return response?.data || [];
+}
+
+// Allocate government stock (admin only)
+export function allocateGovernmentStock(payload: {
+  shopId: string;
+  itemCode: string;
+  quantity: number;
+  reason?: string;
+}) {
+  return request(`/stocks/allocate`, {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
@@ -198,6 +280,47 @@ export async function checkHealth(): Promise<HealthStatus> {
   }
 
   return body as HealthStatus;
+}
+
+// -------------------------------------------------------------
+// USERS (Admin only)
+// -------------------------------------------------------------
+export async function getAllUsers(params?: {
+  role?: 'all' | 'admin' | 'shopkeeper' | 'cardholder';
+  shopId?: string;
+  flagged?: boolean;
+}): Promise<UserData[]> {
+  const query = new URLSearchParams();
+  if (params?.role) query.set('role', params.role);
+  if (params?.shopId) query.set('shopId', params.shopId);
+  if (params?.flagged) query.set('flagged', 'true');
+
+  const response: any = await request(`/users?${query.toString()}`);
+  return response?.data || [];
+}
+
+export async function getUserStats(): Promise<UserStats[]> {
+  const response: any = await request(`/users/stats`);
+  return response?.data || [];
+}
+
+export async function getUserById(id: number): Promise<UserData> {
+  const response: any = await request(`/users/${id}`);
+  return response?.data;
+}
+
+export function flagUser(userId: number, isFlagged: boolean, flagReason?: string) {
+  return request(`/users/${userId}/flag`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isFlagged, flagReason }),
+  });
+}
+
+export function setUserActive(userId: number, isActive: boolean) {
+  return request(`/users/${userId}/active`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isActive }),
+  });
 }
 
 export { request };

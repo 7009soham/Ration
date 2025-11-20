@@ -96,5 +96,35 @@ router.post("/", authenticateToken, async (req: AuthRequest, res: Response) => {
   }
 });
 
+// PATCH /api/notifications/:id/ack → Acknowledge notification
+router.patch("/:id/ack", authenticateToken, async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    await pool.execute(
+      `UPDATE notifications SET acknowledged_at = NOW() WHERE id = ?`,
+      [id]
+    );
+
+    const [rows]: any = await pool.execute(
+      `SELECT id, shop_id AS shopId, user_id AS userId, type, message,
+              is_sent AS isSent,
+              DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
+              DATE_FORMAT(acknowledged_at, '%Y-%m-%d %H:%i:%s') AS acknowledgedAt
+       FROM notifications WHERE id = ?`,
+      [id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ error: "Notification not found" });
+    }
+
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error("PATCH /notifications/:id/ack error:", err);
+    return res.status(500).json({ error: "Failed to acknowledge notification" });
+  }
+});
+
 
 export default router;

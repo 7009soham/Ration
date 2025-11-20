@@ -18,7 +18,10 @@ import {
   Send,
   Menu,
   Minus,
-  RefreshCw
+  RefreshCw,
+  Flag,
+  Shield,
+  Eye
 } from 'lucide-react';
 
 interface MobileAdminDashboardProps {
@@ -41,12 +44,23 @@ export function MobileAdminDashboard({ userData, onLogout }: MobileAdminDashboar
   const [stock, setStock] = useState<StockItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [users, setUsers] = useState<any[]>([]);
+  const [userStats, setUserStats] = useState<any[]>([]);
+  const [selectedShop, setSelectedShop] = useState('all');
+  const [selectedRole, setSelectedRole] = useState('all');
+  const [showFlaggedOnly, setShowFlaggedOnly] = useState(false);
   const API_BASE = 'http://localhost:5000/api';
 
   const [notifications, setNotifications] = useState([
     { id: 1, message: 'Wheat stock is running low', type: 'warning', sent: false },
     { id: 2, message: 'New rice stock added - 150kg', type: 'success', sent: true },
     ]);  
+  
+  const [customNotification, setCustomNotification] = useState({
+    category: 'all',
+    type: 'stock',
+    message: ''
+  });
 
   const [tokens] = useState([
     { id: 'T001', cardHolder: 'RAM KUMAR (BPL123456)', category: 'BPL', timeSlot: '10:00 AM', status: 'active' },
@@ -57,11 +71,19 @@ export function MobileAdminDashboard({ userData, onLogout }: MobileAdminDashboar
   
   const fetchNotifications = async () => {
     try {
-      const res = await fetch(`${API_BASE}/notifications?shopId=${encodeURIComponent(userData?.shopId || 'SHOP001')}`, {
+      const res = await fetch(`${API_BASE}/notifications?limit=50`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      if (res.ok && data.success) setNotifications(data.data.map((n: any) => ({ id: n.id, message: n.message, type: n.type, sent: n.isSent })));
+      // Backend returns array directly, not wrapped in { success, data }
+      if (res.ok && Array.isArray(data)) {
+        setNotifications(data.map((n: any) => ({ 
+          id: n.id, 
+          message: n.message, 
+          type: n.type, 
+          sent: n.isSent 
+        })));
+      }
     } catch {}
   };
   
@@ -84,8 +106,45 @@ export function MobileAdminDashboard({ userData, onLogout }: MobileAdminDashboar
         body: JSON.stringify({ shopId: userData?.shopId || 'SHOP001', type: 'stock', message: 'Stock update broadcast' })
       });
       const data = await res.json();
-      if (res.ok && data.success) setNotifications(prev => [{ id: data.data.id, message: data.data.message, type: data.data.type, sent: true }, ...prev]);
+      if (res.ok && data.success) {
+        setNotifications(prev => [{ 
+          id: data.id, 
+          message: 'Stock update broadcast', 
+          type: 'stock', 
+          sent: true 
+        }, ...prev]);
+      }
     } catch {}
+  };
+  
+  const sendCustomNotification = async () => {
+    if (!customNotification.message.trim()) return;
+    
+    try {
+      const res = await fetch(`${API_BASE}/notifications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ 
+          shopId: userData?.shopId || 'SHOP001', 
+          type: customNotification.type,
+          message: `[${customNotification.category}] ${customNotification.message}`,
+          category: customNotification.category
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setNotifications(prev => [{ 
+          id: data.id, 
+          message: `[${customNotification.category}] ${customNotification.message}`, 
+          type: customNotification.type, 
+          sent: true 
+        }, ...prev]);
+        setCustomNotification({ category: 'all', type: 'stock', message: '' });
+        alert(`Notification sent to ${customNotification.category === 'all' ? 'all users' : customNotification.category + ' cardholders'}`);
+      }
+    } catch (e) {
+      alert('Failed to send notification');
+    }
   };
 
   const fetchStock = async () => {
@@ -120,8 +179,19 @@ export function MobileAdminDashboard({ userData, onLogout }: MobileAdminDashboar
 
   useEffect(() => {
     fetchStock();
+    if (activeTab === 'users') {
+      fetchUsers();
+      fetchUserStats();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'users') {
+      fetchUsers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRole, selectedShop, showFlaggedOnly]);
 
   const updateStock = async (itemId: string, change: number) => {
     try {
@@ -129,26 +199,114 @@ export function MobileAdminDashboard({ userData, onLogout }: MobileAdminDashboar
       setError(null);
       const token = localStorage.getItem('auth_token');
       const shopId = userData?.shopId || 'SHOP001';
+      
+      // Find current quantity
+      const currentItem = stock.find(item => item.id === itemId);
+      if (!currentItem) throw new Error('Item not found');
+      
+      // Calculate new quantity
+      const newQuantity = Math.max(0, currentItem.quantity + change);
+      
       const res = await fetch(`${API_BASE}/stocks/${encodeURIComponent(itemId)}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ delta: change, shopId })
+        body: JSON.stringify({ quantity: newQuantity, shopId })
       });
       const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.message || 'Failed to update');
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to update');
+      
+      // Update local state with response
+      const updatedItem = data.data;
       setStock(prev => prev.map(item => item.id === itemId ? {
         ...item,
-        quantity: Number(data.data.quantity),
-        lastRestocked: data.data.lastRestocked || item.lastRestocked,
-        lowStock: Number(data.data.quantity) < 50
+        quantity: Number(updatedItem.quantity),
+        lastRestocked: updatedItem.updatedAt || new Date().toLocaleString(),
+        lowStock: Number(updatedItem.quantity) < 50
       } : item));
     } catch (e: any) {
       setError(e.message || 'Failed to update');
+      console.error('Update stock error:', e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const params = new URLSearchParams();
+      if (selectedRole !== 'all') params.set('role', selectedRole);
+      if (selectedShop !== 'all') params.set('shopId', selectedShop);
+      if (showFlaggedOnly) params.set('flagged', 'true');
+
+      const res = await fetch(`${API_BASE}/users?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) setUsers(data.data || []);
+    } catch (err) {
+      console.error('Failed to fetch users:', err);
+    }
+  };
+
+  const fetchUserStats = async () => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE}/users/stats`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) setUserStats(data.data || []);
+    } catch (err) {
+      console.error('Failed to fetch user stats:', err);
+    }
+  };
+
+  const toggleFlagUser = async (userId: number, currentlyFlagged: boolean, userName: string) => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      
+      if (!currentlyFlagged) {
+        const reason = prompt(`Enter reason for flagging ${userName}:`);
+        if (!reason) return;
+
+        const res = await fetch(`${API_BASE}/users/${userId}/flag`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ isFlagged: true, flagReason: reason })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.success) {
+          alert(`🚩 ${userName} has been flagged. Government authorities will be notified.`);
+          await fetchUsers();
+        }
+      } else {
+        if (confirm(`Remove flag from ${userName}?`)) {
+          const res = await fetch(`${API_BASE}/users/${userId}/flag`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({ isFlagged: false })
+          });
+
+          const data = await res.json();
+          if (res.ok && data.success) {
+            alert(`Flag removed from ${userName}`);
+            await fetchUsers();
+          }
+        }
+      }
+    } catch (err) {
+      alert('Failed to update flag status');
     }
   };
 
@@ -224,10 +382,60 @@ export function MobileAdminDashboard({ userData, onLogout }: MobileAdminDashboar
           <div className="space-y-4">
             <h2>Notifications</h2>
             
-            <Button onClick={sendBulkNotification} className="w-full h-12 bg-orange-600 hover:bg-orange-700">
-              <Send className="w-4 h-4 mr-2" />
-              Send Stock Update to All
-            </Button>
+            {/* Custom Notification Form */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Send Custom Notification</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label className="text-sm">Card Category (NFSA 2013)</Label>
+                  <select
+                    className="w-full border rounded-md p-2 mt-1"
+                    value={customNotification.category}
+                    onChange={(e) => setCustomNotification({ ...customNotification, category: e.target.value })}
+                  >
+                    <option value="all">All Cardholders</option>
+                    <option value="AAY">AAY - Antyodaya Anna Yojana (Poorest of Poor)</option>
+                    <option value="PHH">PHH - Priority Household (Below Poverty Line)</option>
+                    <option value="BPL">BPL - Below Poverty Line (Legacy)</option>
+                    <option value="APL">APL - Above Poverty Line (Discontinued)</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <Label className="text-sm">Notification Type</Label>
+                  <select
+                    className="w-full border rounded-md p-2 mt-1"
+                    value={customNotification.type}
+                    onChange={(e) => setCustomNotification({ ...customNotification, type: e.target.value })}
+                  >
+                    <option value="stock">Stock Update</option>
+                    <option value="alert">Alert/Warning</option>
+                    <option value="system">System Message</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <Label className="text-sm">Message</Label>
+                  <textarea
+                    className="w-full border rounded-md p-2 mt-1 min-h-[80px]"
+                    placeholder="Enter notification message..."
+                    value={customNotification.message}
+                    onChange={(e) => setCustomNotification({ ...customNotification, message: e.target.value })}
+                  />
+                </div>
+                
+                <Button 
+                  onClick={sendCustomNotification} 
+                  className="w-full bg-green-600 hover:bg-green-700"
+                  disabled={!customNotification.message.trim()}
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  Send to {customNotification.category === 'all' ? 'All Users' : customNotification.category + ' Cardholders'}
+                </Button>
+              </CardContent>
+            </Card>
             
             <div className="space-y-3">
               <h3 className="font-medium">Recent Notifications</h3>
@@ -352,6 +560,155 @@ export function MobileAdminDashboard({ userData, onLogout }: MobileAdminDashboar
           </div>
         );
 
+      case 'users':
+        return (
+          <div className="space-y-4">
+            <h2>Users & Shopkeepers Management</h2>
+            
+            {/* Statistics */}
+            <div className="grid grid-cols-2 gap-3">
+              {userStats.map((stat) => (
+                <Card key={stat.shopId}>
+                  <CardContent className="p-3">
+                    <div className="text-xs text-muted-foreground mb-1">{stat.shopName}</div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Shopkeepers:</span>
+                      <Badge variant="outline">{stat.shopkeepers}</Badge>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm">Cardholders:</span>
+                      <Badge variant="outline">{stat.cardholders}</Badge>
+                    </div>
+                    {stat.flaggedShopkeepers > 0 && (
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-sm text-red-600">🚩 Flagged:</span>
+                        <Badge variant="destructive">{stat.flaggedShopkeepers}</Badge>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Filters */}
+            <Card>
+              <CardContent className="p-3 space-y-3">
+                <div>
+                  <Label className="text-xs">Filter by Role</Label>
+                  <select 
+                    value={selectedRole} 
+                    onChange={(e) => setSelectedRole(e.target.value)}
+                    className="w-full mt-1 p-2 border rounded text-sm"
+                  >
+                    <option value="all">All Roles</option>
+                    <option value="shopkeeper">Shopkeepers</option>
+                    <option value="cardholder">Cardholders</option>
+                    <option value="admin">Admins</option>
+                  </select>
+                </div>
+                <div>
+                  <Label className="text-xs">Filter by Shop</Label>
+                  <select 
+                    value={selectedShop} 
+                    onChange={(e) => setSelectedShop(e.target.value)}
+                    className="w-full mt-1 p-2 border rounded text-sm"
+                  >
+                    <option value="all">All Shops</option>
+                    {userStats.map((stat) => (
+                      <option key={stat.shopId} value={stat.shopId}>{stat.shopName}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="flagged-only"
+                    checked={showFlaggedOnly}
+                    onChange={(e) => setShowFlaggedOnly(e.target.checked)}
+                    className="rounded"
+                  />
+                  <Label htmlFor="flagged-only" className="text-sm">Show Flagged Only</Label>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Users List */}
+            <div className="space-y-2">
+              {users.length === 0 && (
+                <Card>
+                  <CardContent className="p-6 text-center text-muted-foreground">
+                    No users found
+                  </CardContent>
+                </Card>
+              )}
+              
+              {users.map((user) => (
+                <Card key={user.id} className={user.isFlagged ? 'border-red-300 bg-red-50' : ''}>
+                  <CardContent className="p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium text-sm truncate">{user.name || 'No Name'}</span>
+                          <Badge variant={
+                            user.role === 'admin' ? 'default' : 
+                            user.role === 'shopkeeper' ? 'secondary' : 
+                            'outline'
+                          } className="text-xs">
+                            {user.role}
+                          </Badge>
+                          {user.isFlagged && (
+                            <Badge variant="destructive" className="text-xs">
+                              <Flag className="w-3 h-3 mr-1" />
+                              Flagged
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground space-y-0.5">
+                          <div className="truncate">{user.email}</div>
+                          {user.shopName && <div>Shop: {user.shopName}</div>}
+                          {user.mobileNumber && <div>📞 {user.mobileNumber}</div>}
+                          {user.cardType && (
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-xs">{user.cardType}</Badge>
+                              {user.familySize && <span>Family: {user.familySize}</span>}
+                            </div>
+                          )}
+                          {user.isFlagged && user.flagReason && (
+                            <div className="text-red-600 mt-1 italic">
+                              ⚠️ {user.flagReason}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {user.role !== 'admin' && (
+                        <Button
+                          variant={user.isFlagged ? "outline" : "destructive"}
+                          size="sm"
+                          onClick={() => toggleFlagUser(user.id, user.isFlagged, user.name)}
+                          className="shrink-0"
+                        >
+                          {user.isFlagged ? (
+                            <>
+                              <Shield className="w-3 h-3 mr-1" />
+                              Unflag
+                            </>
+                          ) : (
+                            <>
+                              <Flag className="w-3 h-3 mr-1" />
+                              Flag
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        );
+
       default:
         return null;
     }
@@ -402,29 +759,32 @@ export function MobileAdminDashboard({ userData, onLogout }: MobileAdminDashboar
       </div>
 
       {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50">
-        <div className="grid grid-cols-4 h-16">
-          {[
-            { id: 'stock', icon: Package, label: 'Stock' },
-            { id: 'notifications', icon: Bell, label: 'Alerts' },
-            { id: 'tokens', icon: Users, label: 'Tokens' },
-            { id: 'analytics', icon: BarChart3, label: 'Reports' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-col items-center justify-center space-y-1 transition-colors ${
-                activeTab === tab.id 
-                  ? 'text-green-600 bg-green-50' 
-                  : 'text-gray-500'
-              }`}
-            >
-              <tab.icon className="w-5 h-5" />
-              <span className="text-xs">{tab.label}</span>
-            </button>
-          ))}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-50">
+        <div className="max-w-screen-xl mx-auto">
+          <div className="grid grid-cols-5 h-16">
+            {[
+              { id: 'stock', icon: Package, label: 'Stock' },
+              { id: 'notifications', icon: Bell, label: 'Alerts' },
+              { id: 'users', icon: Users, label: 'Users' },
+              { id: 'tokens', icon: Clock, label: 'Tokens' },
+              { id: 'analytics', icon: BarChart3, label: 'Reports' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex flex-col items-center justify-center space-y-1 transition-colors ${
+                  activeTab === tab.id 
+                    ? 'text-green-600 bg-green-50' 
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <tab.icon className="w-5 h-5" />
+                <span className="text-xs font-medium">{tab.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      </nav>
     </div>
   );
 }

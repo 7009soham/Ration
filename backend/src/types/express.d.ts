@@ -5,7 +5,7 @@ declare module "express-serve-static-core" {
     user?: {
       userId: number;
       email: string;
-      role: "cardholder" | "admin";
+      role: "cardholder" | "shopkeeper" | "admin";
       shopId: string | null;  // ⭐ REQUIRED
     };
   }

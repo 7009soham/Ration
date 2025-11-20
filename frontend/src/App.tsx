@@ -5,7 +5,7 @@ import { MobileAdminDashboard } from './components/MobileAdminDashboard';
 import { MobileCardholderDashboard } from './components/MobileCardholderDashboard';
 
 type AppState = 'splash' | 'auth' | 'dashboard';
-type UserType = 'admin' | 'cardholder' | null;
+type UserType = 'admin' | 'shopkeeper' | 'cardholder' | null;
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>('auth'); // default; will auto-restore if token exists
@@ -37,7 +37,7 @@ export default function App() {
     setAppState('auth');
   };
 
-  const handleLogin = (type: 'admin' | 'cardholder', data: any) => {
+  const handleLogin = (type: 'admin' | 'shopkeeper' | 'cardholder', data: any) => {
     setUserType(type);
     setUserData(data);
     setAppState('dashboard');
@@ -64,6 +64,25 @@ export default function App() {
   if (appState === 'dashboard') {
     if (userType === 'admin') {
       return <MobileAdminDashboard userData={userData} onLogout={handleLogout} />;
+    }
+
+    if (userType === 'shopkeeper') {
+      // TODO: Create MobileShopkeeperDashboard component
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-amber-600 text-white p-8">
+          <div className="text-center">
+            <h1 className="text-3xl font-bold mb-4">Shopkeeper Dashboard</h1>
+            <p className="mb-4">Coming soon! You are logged in as shopkeeper.</p>
+            <p className="text-sm mb-6">Email: {(userData as any)?.email}</p>
+            <button 
+              onClick={handleLogout}
+              className="px-6 py-2 bg-white text-amber-600 rounded-lg font-semibold"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      );
     }
 
     if (userType === 'cardholder') {

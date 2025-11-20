@@ -26,8 +26,8 @@ router.post(
   [
     body('email').trim().isEmail().withMessage('Valid email is required'),
     body('role')
-      .isIn(['cardholder', 'admin'])
-      .withMessage('Role must be cardholder or admin'),
+      .isIn(['cardholder', 'shopkeeper', 'admin'])
+      .withMessage('Role must be cardholder, shopkeeper, or admin'),
   ],
   async (req: Request, res: Response) => {
     const validationError = handleValidation(req, res);
@@ -67,8 +67,8 @@ router.post(
       .isLength({ min: 6, max: 6 })
       .withMessage('Code must be 6 digits'),
     body('role')
-      .isIn(['cardholder', 'admin'])
-      .withMessage('Role must be cardholder or admin'),
+      .isIn(['cardholder', 'shopkeeper', 'admin'])
+      .withMessage('Role must be cardholder, shopkeeper, or admin'),
     body('language').optional().isString().trim(),
   ],
   async (req: Request, res: Response) => {

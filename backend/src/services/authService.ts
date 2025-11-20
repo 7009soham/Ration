@@ -19,13 +19,13 @@ interface VerificationCode extends RowDataPacket {
 interface User extends RowDataPacket {
   id: number;
   email: string;
-  role: 'cardholder' | 'admin';
+  role: 'cardholder' | 'shopkeeper' | 'admin';
   name: string | null;
-  ration_card: string | null;
-  category: 'BPL' | 'APL' | null;
   language: string;
   shop_id: string | null;
   is_active: boolean;
+  ration_card_number?: string | null; // New schema field
+  card_type?: 'AAY' | 'PHH' | 'BPL' | 'APL' | null; // New schema field
 }
 
 export class AuthService {
@@ -35,7 +35,7 @@ export class AuthService {
 
   async sendVerificationCode(
     email: string,
-    role: 'cardholder' | 'admin'
+    role: 'cardholder' | 'shopkeeper' | 'admin'
   ): Promise<boolean> {
     try {
       const code = this.generateCode();
@@ -77,7 +77,7 @@ export class AuthService {
   async verifyCode(
     email: string,
     code: string,
-    role: 'cardholder' | 'admin',
+    role: 'cardholder' | 'shopkeeper' | 'admin',
     language: string = 'english'
   ): Promise<any> {
     try {
@@ -115,54 +115,27 @@ export class AuthService {
       );
 
       const [users] = await db.execute<User[]>(
-        'SELECT * FROM users WHERE email = ?',
+        'SELECT id, email, role, name, language, shop_id, is_active, ration_card_number, card_type FROM users WHERE email = ?',
         [email]
       );
 
       let user: User;
 
       if (users.length === 0) {
-        // ⭐ FIX: assign valid shop to ALL roles
+        // For new emails we do NOT auto-create complex ration card details.
+        // Minimal insertion to satisfy login; admin can enrich later.
         const shopId = 'SHOP001';
-
-        const category = email.includes('bpl') ? 'BPL' : 'APL';
-        const rationCard =
-          category + Math.floor(100000 + Math.random() * 900000);
-
-        const name = 'राम कुमार / Ram Kumar';
-
+        const name = email.split('@')[0];
         const [result] = await db.execute<ResultSetHeader>(
-          `INSERT INTO users (email, role, name, ration_card, category, language, shop_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [email, role, name, rationCard, category, language, shopId]
+          `INSERT INTO users (email, role, name, language, shop_id, is_active)
+           VALUES (?, ?, ?, ?, ?, TRUE)`,
+          [email, role, name, language, shopId]
         );
-
         const [newUser] = await db.execute<User[]>(
-          'SELECT * FROM users WHERE id = ?',
+          'SELECT id, email, role, name, language, shop_id, is_active FROM users WHERE id = ?',
           [result.insertId]
         );
-
         user = newUser[0];
-
-        if (role === 'cardholder') {
-          const month = new Date().getMonth() + 1;
-          const year = new Date().getFullYear();
-          const items = [
-            { code: 'rice', quantity: 5 },
-            { code: 'wheat', quantity: 5 },
-            { code: 'sugar', quantity: 1 },
-            { code: 'kerosene', quantity: 2 }
-          ];
-
-          for (const item of items) {
-            await db.execute(
-              `INSERT INTO monthly_allocations 
-               (user_id, item_code, eligible_quantity, month, year)
-               VALUES (?, ?, ?, ?, ?)`,
-              [user.id, item.code, item.quantity, month, year]
-            );
-          }
-        }
       } else {
         user = users[0];
 
@@ -174,17 +147,17 @@ export class AuthService {
 
       // ⭐ JWT now always contains a valid shopId
       const token = sign(
-  {
-    userId: user.id,
-    email: user.email,
-    role: user.role,
-    shopId: user.shop_id,
-  },
-  process.env.JWT_SECRET as string,
-  {
-    expiresIn: process.env.JWT_EXPIRES_IN || "7d",
-  } as SignOptions
-);
+        {
+          userId: user.id,
+          email: user.email,
+          role: user.role,
+          shopId: user.shop_id,
+        },
+        process.env.JWT_SECRET as string,
+        {
+          expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+        } as SignOptions
+      );
 
 
       return {
@@ -195,8 +168,8 @@ export class AuthService {
           email: user.email,
           role: user.role,
           name: user.name,
-          rationCard: user.ration_card,
-          category: user.category,
+          rationCard: user.ration_card_number,
+          cardType: user.card_type,
           language: user.language,
           shopId: user.shop_id
         }

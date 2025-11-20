@@ -50,6 +50,11 @@ export function AdminDashboard({ userData, onLogout }: AdminDashboardProps) {
   const [loadingTokens, setLoadingTokens] = useState(true);
 
   const [newStock, setNewStock] = useState({ itemId: "", quantity: "" });
+  const [customNotification, setCustomNotification] = useState({
+    category: 'all',
+    type: 'stock',
+    message: ''
+  });
 
   // ============================================================
   // AUTO REFRESH — STOCK + NOTIFS + TOKENS
@@ -131,6 +136,40 @@ export function AdminDashboard({ userData, onLogout }: AdminDashboardProps) {
           message: "Stock update available for all users",
         } as any,
       ]);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to send notification");
+    }
+  };
+  
+  // ============================================================
+  // SEND CUSTOM NOTIFICATION
+  // ============================================================
+  const sendCustomNotification = async () => {
+    if (!customNotification.message.trim()) {
+      alert("Please enter a message");
+      return;
+    }
+    
+    try {
+      await createNotification({
+        shopId,
+        userId: null,
+        type: customNotification.type as any,
+        message: `[${customNotification.category}] ${customNotification.message}`,
+      });
+
+      setNotifications((prev) => [
+        {
+          id: Date.now(),
+          type: customNotification.type as any,
+          message: `[${customNotification.category}] ${customNotification.message}`,
+        } as any,
+        ...prev,
+      ]);
+      
+      setCustomNotification({ category: 'all', type: 'stock', message: '' });
+      alert(`Notification sent to ${customNotification.category === 'all' ? 'all users' : customNotification.category + ' cardholders'}`);
     } catch (err) {
       console.error(err);
       alert("Failed to send notification");
@@ -258,10 +297,62 @@ export function AdminDashboard({ userData, onLogout }: AdminDashboardProps) {
                 </CardTitle>
               </CardHeader>
 
-              <CardContent>
-                <Button className="w-full bg-orange-600" onClick={sendBulkNotification}>
-                  <Send className="w-4 h-4 mr-2" /> Notify All Users
-                </Button>
+              <CardContent className="space-y-4">
+                {/* Custom Notification Form */}
+                <Card className="border-green-200 bg-green-50">
+                  <CardHeader>
+                    <CardTitle className="text-base">Send Custom Notification</CardTitle>
+                    <CardDescription>Target specific card categories based on NFSA 2013</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div>
+                      <Label>Card Category (NFSA 2013)</Label>
+                      <select
+                        className="w-full border rounded-md p-2 mt-1"
+                        value={customNotification.category}
+                        onChange={(e) => setCustomNotification({ ...customNotification, category: e.target.value })}
+                      >
+                        <option value="all">All Cardholders</option>
+                        <option value="AAY">AAY - Antyodaya Anna Yojana (Poorest of Poor)</option>
+                        <option value="PHH">PHH - Priority Household (Below Poverty Line)</option>
+                        <option value="BPL">BPL - Below Poverty Line (Legacy)</option>
+                        <option value="APL">APL - Above Poverty Line (Discontinued)</option>
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <Label>Notification Type</Label>
+                      <select
+                        className="w-full border rounded-md p-2 mt-1"
+                        value={customNotification.type}
+                        onChange={(e) => setCustomNotification({ ...customNotification, type: e.target.value })}
+                      >
+                        <option value="stock">Stock Update</option>
+                        <option value="alert">Alert/Warning</option>
+                        <option value="system">System Message</option>
+                      </select>
+                    </div>
+                    
+                    <div>
+                      <Label>Message</Label>
+                      <textarea
+                        className="w-full border rounded-md p-2 mt-1 min-h-[100px]"
+                        placeholder="Enter notification message..."
+                        value={customNotification.message}
+                        onChange={(e) => setCustomNotification({ ...customNotification, message: e.target.value })}
+                      />
+                    </div>
+                    
+                    <Button 
+                      onClick={sendCustomNotification} 
+                      className="w-full bg-green-600"
+                      disabled={!customNotification.message.trim()}
+                    >
+                      <Send className="w-4 h-4 mr-2" />
+                      Send to {customNotification.category === 'all' ? 'All Users' : customNotification.category + ' Cardholders'}
+                    </Button>
+                  </CardContent>
+                </Card>
 
                 <h3 className="mt-4 font-medium">Recent Notifications</h3>
 
